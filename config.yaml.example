@@ -1,0 +1,52 @@
+# ADB Agent Configuration
+# Copy this file to config.yaml and customize for your device
+# Connection settings
+device: ""                    # Device serial or IP:port. Empty = auto-detect
+mode: "usb"                   # "usb" or "wifi"
+wifi_ip: ""                   # Phone IP for WiFi ADB (e.g. "192.168.1.100")
+wifi_port: 5555               # WiFi ADB port
+
+# Timeouts (seconds)
+timeouts:
+  ui_dump: 10
+  input_action: 8
+  app_launch: 10
+  install: 120
+  screenshot: 8
+  connect: 8
+  reconnect_interval: 3
+  reconnect_retries: 3
+  wait_poll_interval: 0.5    # Polling interval for wait commands
+
+# Output settings
+output:
+  max_ui_depth: 20            # Max UI tree depth for dump
+  max_text_length: 50         # Truncate text longer than this
+  compact_separator: " | "
+
+# Safety settings
+sensitive_packages:
+  - "com.eg.android.AlipayGphone"     # Alipay
+  - "com.android.bankabc"             # ABC Bank
+  - "com.icbc"                         # ICBC Bank
+  - "com.chinamworld.bocmbci"         # BOC Bank
+  - "com.CCB"                          # CCB Bank
+  - "com.cmb.pb"                       # CMB Bank
+
+sensitive_keywords:
+  - "支付"
+  - "付款"
+  - "转账"
+  - "密码"
+  - "银行卡"
+  - "余额"
+  - "确认付款"
+  - "输入密码"
+
+# Audit log
+audit_log: "phone_control_audit.log"
+
+# Screen info (adjust to your device)
+screen:
+  width: 1080
+  height: 2400

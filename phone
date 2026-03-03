@@ -1,0 +1,11 @@
+#!/bin/bash
+# Wrapper script: auto-activates venv and runs phone_control.py
+SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV_PYTHON="$SKILL_DIR/.venv/bin/python3"
+
+if [ ! -f "$VENV_PYTHON" ]; then
+  echo "ERROR: venv not found. Run: python3 -m venv $SKILL_DIR/.venv && $SKILL_DIR/.venv/bin/pip install -r $SKILL_DIR/requirements.txt"
+  exit 1
+fi
+
+exec "$VENV_PYTHON" "$SKILL_DIR/scripts/phone_control.py" "$@"
