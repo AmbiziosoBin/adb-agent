@@ -509,6 +509,19 @@ def cmd_dump(args):
         # Numbered mode: output scroll hints as prominent text BEFORE JSON
         nodes = _collect_interactive_nodes(root, filters)
 
+        # Detect captcha-related keywords in UI elements
+        _captcha_keywords = ("验证", "滑块", "点选", "轨迹", "拼图")
+        _captcha_detected = False
+        for _n in nodes:
+            _txt = (truncate_text(_n.get("text", "")) + " " + truncate_text(_n.get("content-desc", ""))).strip()
+            if any(kw in _txt for kw in _captcha_keywords):
+                _captcha_detected = True
+                break
+        if _captcha_detected:
+            _skill_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            _captcha_doc = os.path.join(_skill_root, "references", "captcha.md")
+            print(f"[重要提示] 如果遇到滑块、点选等验证环节，请立即用 read 工具阅读 {_captcha_doc} 获取完整处理流程，不要自行猜测坐标。")
+
         for hint in scroll_hints:
             swipe_cmd = hint.get("swipeCommand", "")
             if hint["direction"] == "vertical":
@@ -576,6 +589,20 @@ def cmd_dump(args):
 
     else:
         # Tree mode: text output with header and hints
+        # Detect captcha-related keywords in tree mode too
+        _captcha_keywords_tree = ("验证", "滑块", "点选", "轨迹", "拼图")
+        _captcha_found = False
+        for _node in root.iter():
+            _a = _get_node_attrs(_node)
+            _t = (_a.get("text", "") + " " + _a.get("content-desc", "")).strip()
+            if any(kw in _t for kw in _captcha_keywords_tree):
+                _captcha_found = True
+                break
+        if _captcha_found:
+            _skill_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            _captcha_doc = os.path.join(_skill_root, "references", "captcha.md")
+            output(f"[重要提示] 如果遇到滑块、点选等验证环节，请立即用 read 工具阅读 {_captcha_doc} 获取完整处理流程，不要自行猜测坐标。")
+
         output(header)
         for hint in scroll_hints:
             output(_format_hint_text(hint))

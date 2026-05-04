@@ -16,6 +16,98 @@ _SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 _MACRO_DIR = os.path.join(_SKILL_ROOT, "macros")
 
 
+def _capture_ui_snapshot(device):
+    """Capture current UI state for change detection.
+    
+    Returns dict with:
+      - package: current package name
+      - activity: current activity name
+      - texts: set of all visible text strings
+      - elements: list of interactive elements with text/desc/bounds
+    """
+    try:
+        current = device.app_current()
+        xml_str = _get_ui_xml(device)
+        root = _parse_xml(xml_str)
+        
+        texts = set()
+        elements = []
+        
+        for node in root.iter():
+            attrs = _get_node_attrs(node)
+            if attrs["text"]:
+                texts.add(attrs["text"])
+            if attrs["content-desc"]:
+                texts.add(attrs["content-desc"])
+            
+            # Collect interactive elements for detailed comparison
+            if attrs["clickable"] or attrs["text"] or attrs["content-desc"]:
+                elements.append({
+                    "text": attrs["text"],
+                    "desc": attrs["content-desc"],
+                    "clickable": attrs["clickable"],
+                    "bounds": attrs["bounds"]
+                })
+        
+        return {
+            "package": current.get("package", ""),
+            "activity": current.get("activity", ""),
+            "texts": texts,
+            "elements": elements
+        }
+    except Exception:
+        return None
+
+
+def _detect_unexpected_ui_change(before, after, action, command):
+    """Detect unexpected UI changes between snapshots.
+    
+    Returns dict with change info if unexpected change detected, None otherwise.
+    
+    Unexpected changes include:
+      - Activity changed (unless action was 'app')
+      - New popup/dialog keywords appeared
+      - Significant new text content (>3 new unique strings)
+    """
+    if not before or not after:
+        return None
+    
+    # Activity change (unless we explicitly launched an app)
+    if action != "app" and before["activity"] != after["activity"]:
+        return {
+            "type": "activity_change",
+            "reason": f"Activity changed from {before['activity']} to {after['activity']}",
+            "before_activity": before["activity"],
+            "after_activity": after["activity"]
+        }
+    
+    # Detect popup/dialog keywords
+    popup_keywords = ["同意", "不同意", "允许", "拒绝", "确定", "取消", "关闭", "我知道了", 
+                      "继续", "返回", "权限", "协议", "条款", "隐私", "验证", "captcha",
+                      "请通过", "拖动", "滑块", "验证码"]
+    
+    new_texts = after["texts"] - before["texts"]
+    popup_detected = any(kw in text for text in new_texts for kw in popup_keywords)
+    
+    if popup_detected:
+        matched_keywords = [kw for text in new_texts for kw in popup_keywords if kw in text]
+        return {
+            "type": "popup_detected",
+            "reason": f"Popup/dialog detected with keywords: {', '.join(set(matched_keywords[:5]))}",
+            "new_texts": list(new_texts)[:10]  # Limit to first 10 for brevity
+        }
+    
+    # Significant UI change (many new elements)
+    if len(new_texts) > 5:
+        return {
+            "type": "major_ui_change",
+            "reason": f"{len(new_texts)} new UI elements appeared",
+            "new_texts": list(new_texts)[:10]
+        }
+    
+    return None
+
+
 def _find_element_by_text(device, text):
     """Check if text exists in UI."""
     xml_str = _get_ui_xml(device)
@@ -112,7 +204,7 @@ def cmd_assert_not_text(args):
 def cmd_shell(args):
     """Execute arbitrary adb shell command."""
     device = get_device(getattr(args, "device", None))
-    command = args.command
+    command = args.shell_cmd
     result = device.shell(command)
     out = result.output if hasattr(result, 'output') else str(result)
     output(out.strip())
@@ -421,11 +513,6 @@ def cmd_batch_steps(args):
     
     Each step has:
       - action: command category (input, ui, app, wait, device, shell, sleep)
-      - command: subcommand name (tap-text, text, key, launch, dump, etc.)
-      - args: dict of arguments for the subcommand
-      - verify_text (optional): text to verify exists after this step
-      - description (optional): human-readable step description
-    """
     from .utils import start_command_timer, _elapsed_ms, is_json_mode, set_json_mode, _ts
     import json as _json
     import sys
@@ -435,6 +522,7 @@ def cmd_batch_steps(args):
     stop_on_error = not getattr(args, "no_stop_on_error", False)
     delay_between = float(getattr(args, "delay", 0.3))
     verify_all = getattr(args, "verify", False)
+    detect_ui_change = not getattr(args, "no_ui_check", False)  # Default: ON
 
     # Parse JSON — from string or file
     try:
@@ -460,6 +548,9 @@ def cmd_batch_steps(args):
     completed = 0
     failed = 0
     batch_start = time.time()
+    ui_change_detected = False
+    ui_snapshot_before = None
+    ui_snapshot_after = None
 
     # Force JSON mode for batch-steps output
     was_json = is_json_mode()
@@ -483,10 +574,27 @@ def cmd_batch_steps(args):
             "result": "",
         }
 
+        # Capture UI before step (for change detection)
+        if detect_ui_change:
+            ui_snapshot_before = _capture_ui_snapshot(device)
+
         try:
             _execute_single_step(device, step_action, step_cmd, step_args)
             step_result["result"] = f"Step {idx} completed: {step_desc}"
             completed += 1
+
+            # Detect UI change after step
+            if detect_ui_change:
+                time.sleep(0.3)  # Wait for UI to settle
+                ui_snapshot_after = _capture_ui_snapshot(device)
+                change_info = _detect_unexpected_ui_change(ui_snapshot_before, ui_snapshot_after, step_action, step_cmd)
+                if change_info:
+                    ui_change_detected = True
+                    step_result["status"] = "interrupted"
+                    step_result["result"] += f" | UI change detected: {change_info['reason']}"
+                    step_result["ui_change"] = change_info
+                    results.append(step_result)
+                    break  # Stop batch execution
 
             # Post-step verification
             if verify_text or verify_all:
@@ -527,7 +635,7 @@ def cmd_batch_steps(args):
 
     # Output final batch result as JSON
     batch_result = {
-        "status": "ok" if failed == 0 else "partial" if completed > 0 else "error",
+        "status": "interrupted" if ui_change_detected else ("ok" if failed == 0 else "partial" if completed > 0 else "error"),
         "command": "batch-steps",
         "timestamp": datetime.datetime.now().isoformat(),
         "duration_ms": batch_duration,
@@ -537,10 +645,20 @@ def cmd_batch_steps(args):
         "steps": results,
     }
 
-    # Reset JSON mode and print the result directly
+    # If UI change detected, add current UI dump for AI to analyze
+    if ui_change_detected and ui_snapshot_after:
+        batch_result["current_ui"] = ui_snapshot_after
+
+    # Reset JSON mode
     set_json_mode(was_json)
+
+    # Print warning OUTSIDE JSON if UI changed (so AI notices immediately)
+    if ui_change_detected:
+        print("⚠️  BATCH-STEPS INTERRUPTED: Unexpected UI change detected (popup/dialog/screen change).")
+        print("⚠️  AI should analyze current_ui in the JSON below and decide next action.\n")
+
     print(_json.dumps(batch_result, ensure_ascii=False))
-    audit_log(f"batch-steps total={total} completed={completed} failed={failed} duration={batch_duration}ms")
+    audit_log(f"batch-steps total={total} completed={completed} failed={failed} interrupted={ui_change_detected} duration={batch_duration}ms")
     mark_output_handled()
 
 

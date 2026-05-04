@@ -5,7 +5,7 @@ metadata:
   {
     "openclaw": {
       "emoji": "📱",
-      "os": ["darwin"],
+      "os": ["darwin", "linux", "win32"],
       "requires": { "bins": ["adb", "python3"] }
     }
   }
@@ -18,8 +18,6 @@ Control an Android phone via ADB + uiautomator2 using `phone_control.py`.
 ## When to Use
 
 **USE** when user asks to operate phone, open apps, tap/type/scroll, install apps, adjust settings, lock/unlock, screenshot, send messages, make calls, check status, or says "帮我.../在手机上.../用手机.../打开..."
-
-**DON'T USE** for general Android knowledge questions, controlling other devices, or when OpenClaw Node native commands are better suited.
 
 ## Setup
 
@@ -39,73 +37,29 @@ Working directory for all commands: `~/.openclaw/workspace/skills/adb-agent`
 ./phone app launch com.tencent.mm           # launch app
 ./phone input key BACK                      # back / home
 ./phone ui current                          # quick check (saves tokens)
-./phone screenshot                          # screenshot (top-level cmd)
+./phone screenshot                          # screenshot (send to user via MEDIA:)
 ./phone --plain input tap-text "确定"       # --plain for text output (JSON is default)
 ```
 
 ## Operating Principles
 
-1. **Look before act**: ALWAYS `ui dump --interactive --numbered` before any operation
-2. **Verify after action**: Re-dump to confirm the action worked
-3. **Save tokens**: Use `--interactive --numbered`. Use `ui current` for quick checks
+**🔴 CRITICAL: Screenshot on key steps** — Call `./phone screenshot` in THREE scenarios:
+1. **After app launch** — verify the app opened correctly
+2. **After task completion** — show final result to user
+3. **When user confirmation needed** — popups, CAPTCHAs, unexpected screens
+
+The command outputs `MEDIA:<path>` which automatically triggers OpenClaw to send the image to the user. You don't need to read or view the image yourself (saves tokens). Just call it and let OpenClaw handle the display.
+
+1. **Look before act**: Always `ui dump --interactive --numbered` before operations
+2. **Verify after action**: Re-dump to confirm success, check UI elements changed for critical actions
+3. **Use app launch**: Don't go HOME and tap icons, use `./phone app launch <package>`
 4. **Wait for loading**: Use `wait text` after launching apps
-5. **Handle popups**: Dismiss with `tap-text "允许"` / `"同意"` / `"确定"`
-6. **Safety first**: Tool auto-blocks payment screens. Never force-bypass
-7. **Scroll to see more**: If `[重要提示]` lines appear BEFORE the JSON, read them first — they contain ready-to-use swipe commands. Horizontal = hidden buttons on right. For feeds, max 1-2 scrolls
-8. **Read element booleans**: `"clickable":true` = tappable. Elements with `"clickable":false` are labels/containers. Also check `"scrollable"`, `"selected"`, `"checked"` when present
-9. **Don't mix CLI flags**: `--search` belongs to `ui dump`, NOT `tap-nth`. `--index` belongs to `tap-text`
-10. **Dumps are snapshots**: After any action, element indexes change. ALWAYS re-dump before `tap-nth`
-11. **Submit search with ENTER**: Use `input key ENTER` after typing in search box
-12. **tap-nth uses cached dump**: `tap-nth N` taps from the LAST `ui dump --numbered`, respecting `--search` filters
-13. **Prefer tap-text over set-text**: Tap input field first, then `input text "content"`. Only use `set-text` to replace existing text
-14. **batch-steps for known flows**: Execute multiple steps in one call to save round-trips
-15. **All commands output JSON by default**: No need for `--json`. Use `--plain` to get text output if needed
-16. **Screenshot auto-delivery**: `./phone screenshot` auto-sends to user via MEDIA: protocol. Do NOT `read` the file
-17. **Proactive screenshot**: Take screenshots after completing tasks, on unexpected screens, popups/CAPTCHAs, at key checkpoints, or when results don't match expectations. Image is auto-delivered.
-18. **Slider/Click CAPTCHA playbook**: If screen shows "拖动滑块" / "请通过以下验证" / slider CAPTCHA:
-
-    **Step 1 — Screenshot & analyze**:
-    ```bash
-    ./phone screenshot
-    ```
-    Study the screenshot to identify:
-    - Slider button center coordinates (x1, y1) — the draggable handle
-    - Target gap/destination coordinates (x2, y2) — where to drag to
-    - Note: y1 and y2 are usually the same (horizontal slider)
-
-    **Step 2 — Execute human-like swipe** using `captcha-swipe` (NOT plain `swipe`):
-    ```bash
-    ./phone input captcha-swipe <x1> <y1> <x2> <y2> \
-      --duration 0.8 \
-      --easing human \
-      --hold-start 0.12 \
-      --hold-end 0.08 \
-      --overshoot 8 \
-      --y-wobble 3 \
-      --steps 30 \
-      --verify \
-      --wait-after 1.5
-    ```
-
-    **Parameter tuning guide** (adjust these between retries):
-    | Parameter | Range | Effect |
-    |-----------|-------|--------|
-    | `--duration` | 0.5–2.0s | Total movement time. Too fast = bot-like; too slow = timeout |
-    | `--easing` | human/ease-in-out/linear | `human` adds natural speed variation + noise |
-    | `--hold-start` | 0.05–0.3s | Finger press-and-hold before moving. Mimics human reaction |
-    | `--hold-end` | 0.03–0.2s | Pause before releasing. Mimics human settling |
-    | `--overshoot` | 0–15px | Slide past target then settle back. Mimics inertia |
-    | `--y-wobble` | 0–5px | Vertical finger deviation during drag. Mimics hand tremor |
-    | `--steps` | 15–60 | Path smoothness. More = smoother trajectory |
-
-    **Step 3 — Check result**:
-    - `--verify` flag auto-checks UI for success/failure keywords after the swipe
-    - If UNCERTAIN, take another screenshot to visually confirm
-
-    **Step 4 — Retry logic** (MAX 3 ATTEMPTS):
-    - ⚠️ **IMPORTANT**: After each failed attempt, the CAPTCHA gap/image typically REFRESHES to a new position. You MUST take a fresh screenshot before retrying to get the new target coordinates.
-    - On retry, vary parameters: try different `--duration` (±0.3s), `--overshoot` (0→10→5), `--easing` (human→ease-in-out)
-    - After 3 failed attempts, **ASK THE USER**: "CAPTCHA failed 3 times. Continue?" — script auto-screenshots on failure so user can see the screen.
+5. **batch-steps for known flows**: Avoid popup-triggering actions (see [batch-steps guide](references/batch-steps.md))
+6. **CAPTCHA handling**: For slider/click CAPTCHAs, see [CAPTCHA guide](references/captcha.md)
+7. **Dumps are snapshots**: Element indexes change after actions, always re-dump before `tap-nth`
+8. **Screenshot auto-delivery**: `./phone screenshot` auto-sends via MEDIA:, don't `read` the file
+9. **UI dump details**: For output format details, see [UI dump guide](references/ui-dump.md)
+10. **Troubleshooting**: Check [troubleshooting guide](references/troubleshooting.md) or [commands reference](references/commands.md)
 
 ## Batch Steps (Multi-Step Operations)
 
@@ -116,145 +70,47 @@ When you already know the sequence of UI actions to perform, use `batch-steps` t
 ./phone batch-steps '[{"action":"input","command":"tap-text","args":{"text":"手机号"}},{"action":"input","command":"text","args":{"content":"13800138000"}},{"action":"input","command":"tap-text","args":{"text":"同意"}},{"action":"input","command":"tap-text","args":{"text":"获取验证码"}}]'
 ```
 
-### batch-steps JSON Format
+**UI Change Auto-Detection**: batch-steps automatically detects unexpected UI changes (popups, dialogs, activity jumps) and interrupts execution. When interrupted, it outputs a warning before the JSON and includes the current UI snapshot in `current_ui` field for analysis.
 
-Input is a JSON array. Each step object:
+**Key Points**:
+- Each step: `{"action": "input/wait/app/ui/device/shell/sleep", "command": "tap-text/text/key/...", "args": {...}}`
+- Options: `--delay 0.3`, `--stop-on-error`, `--verify`, `--no-ui-check`
+- ⚠️ Avoid popup-triggering actions ("Get Code", "Submit", "Pay") in batch-steps
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `action` | ✅ | Command category: `input`, `wait`, `app`, `ui`, `device`, `shell`, `sleep` |
-| `command` | ✅ | Subcommand: `tap-text`, `text`, `key`, `tap`, `tap-id`, `tap-nth`, `swipe-dir`, `clear`, `set-text`, `launch`, `stop`, `dump`, `screen-on`, `unlock` |
-| `args` | ✅ | Dict of arguments for the subcommand |
-| `description` | ❌ | Human-readable step label (for logging) |
-| `verify_text` | ❌ | Text to check exists after step completes |
+For complete JSON format, supported actions, and examples, see [batch-steps guide](references/batch-steps.md).
 
-### batch-steps Options
+## UI Dump Output Format
 
-- `--delay 0.3` — Delay between steps (default 0.3s)
-- `--stop-on-error` — Stop on first error (default)
-- `--no-stop-on-error` — Continue even if a step fails
-- `--verify` — Verify UI state after each step
+`ui dump --interactive --numbered` outputs scroll hints (text) FIRST, then JSON:
+- **Scroll hints** (`[重要提示]`): Read these first! They tell you if the page is scrollable and provide ready-to-use swipe commands
+- **Element fields**: `index` (for tap-nth), `text`, `desc`, `center` [x,y], `clickable` (boolean), `scrollable`/`selected`/`checked` (when true)
+- **Root fields**: `package`, `activity`, `screen` {width,height}
 
-### batch-steps Output (always JSON)
+For detailed field descriptions and examples, see [UI dump guide](references/ui-dump.md).
 
-```json
-{
-  "status": "ok",
-  "command": "batch-steps",
-  "timestamp": "2026-03-02T21:30:00",
-  "duration_ms": 4500,
-  "total_steps": 4,
-  "completed": 4,
-  "failed": 0,
-  "steps": [
-    {"step": 1, "status": "ok", "duration_ms": 1200, "description": "input tap-text", "result": "..."},
-    {"step": 2, "status": "ok", "duration_ms": 800, "description": "input text", "result": "..."},
-    {"step": 3, "status": "ok", "duration_ms": 500, "description": "input tap-text", "result": "..."},
-    {"step": 4, "status": "ok", "duration_ms": 2000, "description": "input tap-text", "result": "..."}
-  ]
-}
-```
+## CAPTCHA Handling
 
-### When to Use batch-steps vs Single Commands
+⚠️ **When encountering CAPTCHAs, you MUST first read `references/captcha.md` for the complete workflow. Do NOT guess coordinates or try random swipes.**
 
-- **Use batch-steps** when: you already see the full UI from a dump and know the exact sequence (login, search, form fill, dismiss dialogs)
-- **Use single commands** when: you need to see UI state after each action to decide the next step (exploring unknown screens, debugging)
+CAPTCHA solving uses `scripts/captcha_solver.py` which calls a third-party recognition API. The AI only needs to:
+1. Analyze CAPTCHA type and element positions from UI dump
+2. Call `captcha_solver.py screenshot` to capture and submit for recognition
+3. Execute swipe/tap based on recognition results
 
-### batch-steps Supported Actions & Args Quick Reference
+See [CAPTCHA guide](references/captcha.md) — **read this file first before any CAPTCHA operation**.
 
-| action | command | args |
-|--------|---------|------|
-| `input` | `tap-text` | `{"text": "确定", "index": 1}` |
-| `input` | `tap` | `{"x": 540, "y": 1200}` |
-| `input` | `tap-id` | `{"resource_id": "com.app:id/btn"}` |
-| `input` | `tap-nth` | `{"n": 3}` |
-| `input` | `text` | `{"content": "hello"}` |
-| `input` | `set-text` | `{"selector": "搜索", "content": "keyword"}` |
-| `input` | `key` | `{"keycode": "ENTER"}` |
-| `input` | `swipe-dir` | `{"direction": "down", "distance": 0.5}` |
-| `input` | `clear` | `{}` |
-| `input` | `captcha-swipe` | `{"x1": 150, "y1": 900, "x2": 650, "y2": 900, "duration": 0.8, "easing": "human", "overshoot": 8, "y_wobble": 3, "verify": true}` |
-| `wait` | `text` | `{"text": "加载完成", "timeout": 10}` |
-| `wait` | `gone` | `{"text": "加载中", "timeout": 10}` |
-| `app` | `launch` | `{"package": "com.tencent.mm"}` |
-| `app` | `stop` | `{"package": "com.tencent.mm"}` |
-| `ui` | `dump` | `{}` (refreshes numbered cache) |
-| `device` | `screen-on` | `{}` |
-| `device` | `unlock` | `{}` |
-| `shell` | (any) | `{"command": "input tap 100 200"}` |
-| `sleep` | (seconds) | `{"seconds": 2}` |
+---
 
-## Numbered Dump Output Format
+## Detailed Documentation Index
 
-`ui dump --interactive --numbered` outputs scroll hints as text FIRST, then JSON:
+For specific scenarios and detailed guides, refer to:
 
-```
-[重要提示] 纵向可滚动(ViewPager)，当前仅显示可见部分。如需查看更多: 'input swipe 360 1069 360 356'。信息流应用避免死循环，最多滚动1-2次。
-{"package":"com.tencent.mm","activity":".ui.LauncherUI","screen":{"width":720,"height":1604},"elements":[{"index":1,"class":"TextView","text":"微信","center":[72,120],"clickable":true},{"index":2,"class":"EditText","desc":"搜索","center":[360,200],"clickable":true},{"index":3,"class":"TextView","text":"张三","center":[300,400],"clickable":false}]}
-```
-
-**Scroll hints** (`[重要提示]`) appear BEFORE JSON — read them first! They tell you whether the page has hidden content and provide ready-to-use swipe commands.
-
-**Element fields**: `index` (for `tap-nth`), `class`, `text` (android:text), `desc` (content-desc), `resourceId` (fallback), `center` [x,y], `clickable` (always boolean), `scrollable`/`selected`/`checked` (only when true)
-
-**Root fields**: `package`, `activity`, `screen` {width,height}, `screenOn` (only when false)
-
-## Default JSON Output (All Other Commands)
-
-All commands output JSON by default. Standard wrapper format:
-
-```json
-{"status":"ok","command":"input tap-text","timestamp":"2026-03-04T02:35:00","duration_ms":1250,"data":["Tapped \"搜索\" at (540,200)"]}
-```
-
-- `status` — `"ok"` or `"error"`
-- `data` — array of output messages
-- `error` — only on failure: `{"message":"...", "hint":"...", "cause":"..."}`
-- Use `--plain` to get legacy text output
-
-## Common Scenarios
-
-### Search and Download App
-```bash
-./phone app launch com.tencent.android.qqdownloader
-./phone wait text "搜索"
-./phone input tap-text "搜索"
-./phone input text "抖音"
-./phone input key ENTER
-./phone wait text "下载"
-./phone ui dump --search "下载" --numbered
-./phone input tap-nth 1                     # pick the right download button
-```
-
-### Send WeChat Message
-```bash
-./phone app launch com.tencent.mm
-./phone wait text "微信"
-./phone ui dump --interactive --numbered
-./phone input tap-text "搜索"
-./phone input text "张三"
-./phone input tap-text "张三"
-./phone wait text "发消息"
-./phone input tap-text "发消息"
-./phone input set-text "" "我晚点到"
-./phone input tap-text "发送"
-```
-
-### Unlock / Scroll
-```bash
-./phone device screen-on && ./phone device unlock --swipe
-./phone input swipe-dir down                # scroll down
-./phone input scroll-to "设置"               # scroll until text found
-./phone input swipe-dir left                # swipe left (switch tab)
-```
-
-## Error Handling
-
-- **Device not found**: `./phone status`
-- **UI dump timeout**: `./phone ui dump --timeout 30`
-- **Text input fails**: `./phone device ime-setup`
-- **Agent crashed**: `./phone device restart-agent`
-- **Connection lost**: `./phone status`, check USB/WiFi
+- 📋 [Commands Reference](references/commands.md) — Complete command list and parameters
+- 🎯 [Common Scenarios](references/scenarios.md) — Messaging, search, login examples
+- 🔧 [Troubleshooting](references/troubleshooting.md) — Common errors and solutions
+- 🤖 [CAPTCHA Guide](references/captcha.md) — Slider/click CAPTCHA complete workflow
+- 📦 [Batch-Steps Guide](references/batch-steps.md) — Batch operations, UI change detection
+- 🎨 [UI Dump Guide](references/ui-dump.md) — Dump output format, element fields
 
 ## Common Mistakes (DON'T DO THESE)
 
@@ -300,14 +156,3 @@ read /Users/smnz/.openclaw/media/phone/screenshot_xxx.png
 ./phone input tap-nth <N>
 ```
 
-## Detailed References
-
-- **All commands & parameters**: see `references/commands.md`
-- **More scenario examples**: see `references/scenarios.md`
-- **Troubleshooting guide**: see `references/troubleshooting.md`
-
-## Performance Notes
-
-- `batch-steps` eliminates AI↔tool round-trips for known flows
-- Numbered dump outputs structured JSON directly, no extra parsing needed
-- Wait polling interval is 0.5s for fast responsiveness

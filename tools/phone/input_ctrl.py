@@ -13,7 +13,15 @@ from . import config as cfg
 
 
 def _find_element_by_text(device, text, index=1):
-    """Find element center by text content. Prioritize clickable elements.
+    """Find element center by text content.
+    
+    Matching priority:
+      1. Exact text match on clickable elements
+      2. Exact text match on non-clickable elements
+      3. Substring match on clickable elements (fallback)
+      4. Substring match on non-clickable elements (fallback)
+    
+    This prevents "同意" from matching "不同意" when an exact "同意" element exists.
     
     Args:
         index: Which match to return (1=first, 2=second, etc.)
@@ -21,27 +29,33 @@ def _find_element_by_text(device, text, index=1):
     xml_str = _get_ui_xml(device)
     root = _parse_xml(xml_str)
     
-    matches = []
+    exact_matches = []
+    substr_matches = []
     
-    # First pass: find clickable elements with matching text
     for node in root.iter():
         attrs = _get_node_attrs(node)
-        if (text in attrs["text"] or text in attrs["content-desc"]) and attrs["clickable"]:
-            bounds = _parse_bounds_str(attrs["bounds"])
-            if bounds:
-                cx = (bounds[0] + bounds[2]) // 2
-                cy = (bounds[1] + bounds[3]) // 2
-                matches.append((cx, cy, True))
+        node_text = attrs["text"]
+        node_desc = attrs["content-desc"]
+        is_exact = (text == node_text or text == node_desc)
+        is_substr = (not is_exact) and (text in node_text or text in node_desc)
+        if not is_exact and not is_substr:
+            continue
+        bounds = _parse_bounds_str(attrs["bounds"])
+        if not bounds:
+            continue
+        cx = (bounds[0] + bounds[2]) // 2
+        cy = (bounds[1] + bounds[3]) // 2
+        entry = (cx, cy, attrs["clickable"])
+        if is_exact:
+            exact_matches.append(entry)
+        else:
+            substr_matches.append(entry)
     
-    # Second pass: non-clickable elements
-    for node in root.iter():
-        attrs = _get_node_attrs(node)
-        if (text in attrs["text"] or text in attrs["content-desc"]) and not attrs["clickable"]:
-            bounds = _parse_bounds_str(attrs["bounds"])
-            if bounds:
-                cx = (bounds[0] + bounds[2]) // 2
-                cy = (bounds[1] + bounds[3]) // 2
-                matches.append((cx, cy, False))
+    # Use exact matches if available, otherwise fall back to substring
+    matches = exact_matches if exact_matches else substr_matches
+    
+    # Sort: clickable elements first
+    matches.sort(key=lambda m: (not m[2],))
     
     if not matches:
         return None, 0
@@ -824,8 +838,31 @@ def cmd_captcha_swipe(args):
         duration=duration,
     )
 
-    # Execute the swipe
-    device.swipe_points(points, duration=total_duration)
+    # Execute the swipe (with timeout — u2 swipe_points can hang on ATX Agent)
+    import threading
+    swipe_error = [None]
+
+    def _do_swipe():
+        try:
+            device.swipe_points(points, duration=total_duration)
+        except Exception as e:
+            swipe_error[0] = e
+
+    swipe_thread = threading.Thread(target=_do_swipe, daemon=True)
+    swipe_thread.start()
+    timeout_sec = max(total_duration * 3, 15)
+    swipe_thread.join(timeout=timeout_sec)
+
+    if swipe_thread.is_alive():
+        from .connection import adb_shell
+        adb_dur_ms = int(total_duration * 1000)
+        adb_shell(f"input swipe {x1} {y1} {x2} {y2} {adb_dur_ms}")
+        output(f"⚠️ u2 swipe_points timed out after {timeout_sec:.0f}s, fell back to adb input swipe")
+    elif swipe_error[0]:
+        from .connection import adb_shell
+        adb_dur_ms = int(total_duration * 1000)
+        adb_shell(f"input swipe {x1} {y1} {x2} {y2} {adb_dur_ms}")
+        output(f"⚠️ u2 swipe_points failed ({swipe_error[0]}), fell back to adb input swipe")
 
     params_str = (f"easing={easing} duration={duration:.2f}s "
                   f"hold={hold_start:.2f}+{hold_end:.2f}s "

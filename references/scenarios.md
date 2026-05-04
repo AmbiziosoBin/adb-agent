@@ -283,6 +283,46 @@ python3 phone_control.py safety audit --lines 10
 
 ---
 
+---
+
+## More Practical Scenarios
+
+### 27. Search and Download App
+```bash
+./phone app launch com.tencent.android.qqdownloader
+./phone wait text "搜索"
+./phone input tap-text "搜索"
+./phone input text "抖音"
+./phone input key ENTER
+./phone wait text "下载"
+./phone ui dump --search "下载" --numbered
+./phone input tap-nth 1                     # Pick the correct download button
+```
+
+### 28. Send WeChat Message
+```bash
+./phone app launch com.tencent.mm
+./phone wait text "微信"
+./phone ui dump --interactive --numbered
+./phone input tap-text "搜索"
+./phone input text "张三"
+./phone input tap-text "张三"
+./phone wait text "发消息"
+./phone input tap-text "发消息"
+./phone input set-text "" "我晚点到"
+./phone input tap-text "发送"
+```
+
+### 29. Unlock and Scroll
+```bash
+./phone device screen-on && ./phone device unlock --swipe
+./phone input swipe-dir down                # Scroll down
+./phone input scroll-to "设置"               # Scroll until text found
+./phone input swipe-dir left                # Swipe left (switch tab)
+```
+
+---
+
 ## Tips for AI
 
 1. **Always `ui dump --interactive --numbered` before clicking** — don't guess coordinates

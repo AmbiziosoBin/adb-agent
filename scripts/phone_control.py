@@ -334,6 +334,7 @@ def build_parser():
     ss.add_argument("--filename", type=str)
     ss.add_argument("--quality", type=int, default=80)
     ss.add_argument("--element", type=str)
+    ss.add_argument("--for-ai", action="store_true", help="Return base64 image when AI needs to view phone screen (e.g., CAPTCHA recognition)")
 
     # ─── SCREENRECORD ───
     sr = sub.add_parser("screenrecord", help="Screen recording")
@@ -467,7 +468,7 @@ def build_parser():
 
     # ─── SHELL ───
     shell = sub.add_parser("shell", help="Run adb shell command")
-    shell.add_argument("command", type=str)
+    shell.add_argument("shell_cmd", type=str, metavar="command")
 
     # ─── INTENT ───
     intent = sub.add_parser("intent", help="Send Intent")
@@ -529,6 +530,7 @@ def build_parser():
     bsteps.add_argument("--no-stop-on-error", action="store_true", help="Continue on error")
     bsteps.add_argument("--delay", type=float, default=0.3, help="Delay between steps in seconds")
     bsteps.add_argument("--verify", action="store_true", help="Dump UI after each step for verification")
+    bsteps.add_argument("--no-ui-check", action="store_true", help="Disable UI change detection (default: enabled)")
 
     # ─── SLEEP ───
     sleep_p = sub.add_parser("sleep", help="Wait N seconds")

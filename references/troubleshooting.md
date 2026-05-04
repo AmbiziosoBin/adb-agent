@@ -219,3 +219,76 @@ python3 phone_control.py safety audit --lines 50
 4. **Use `ui diff`** after operations instead of full re-dump
 5. **Set up watchers** for common popups to reduce back-and-forth
 6. **Cache device info** in config.yaml so you don't query it every time
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Wrong screenshot command location
+```bash
+# ✗ Wrong: screenshot is a top-level command, not under device
+./phone device screenshot
+
+# ✓ Correct
+./phone screenshot
+./phone screenshot --filename shot.png
+```
+
+### Mistake 2: Reading screenshot file wastes tokens
+```bash
+# ✗ Wrong: reading screenshot file (wastes tokens!)
+./phone screenshot
+read /Users/smnz/.openclaw/media/phone/screenshot_xxx.png
+
+# ✓ Correct: screenshot auto-sends via MEDIA: protocol
+./phone screenshot
+```
+
+### Mistake 3: Mixing command flags
+```bash
+# ✗ Wrong: --index is for tap-text, not tap-nth
+./phone input tap-nth 2 --search "搜索"
+
+# ✓ Correct: use ui dump --search first, then tap-nth
+./phone ui dump --search "搜索" --numbered
+./phone input tap-nth 1
+```
+
+### Mistake 4: Wrong swipe parameter format
+```bash
+# ✗ Wrong: swipe's 5th positional argument
+./phone input swipe 626 135 626 135 100
+
+# ✓ Correct: use --duration flag
+./phone input swipe 626 135 626 135 --duration 0.1
+```
+
+### Mistake 5: Shell command missing quotes
+```bash
+# ✗ Wrong: shell command needs quotes around the full command
+./phone shell input tap 626 135
+
+# ✓ Correct: wrap with quotes
+./phone shell "input tap 626 135"
+```
+
+### Mistake 6: Using stale dump data
+```bash
+# ✗ Wrong: using outdated text from old dump
+./phone input tap-text "pubg aespa联名"   # Text may have changed!
+
+# ✓ Correct: re-dump first
+./phone ui dump --interactive --numbered
+./phone input tap-nth <N>
+```
+
+### Mistake 7: Not verifying results after action
+```bash
+# ✗ Wrong: clicking without checking if it worked
+./phone input tap-text "获取验证码"
+# Assuming success, moving on...
+
+# ✓ Correct: re-dump to verify
+./phone input tap-text "获取验证码"
+./phone ui dump --interactive --numbered  # Check if button changed to countdown
+```
